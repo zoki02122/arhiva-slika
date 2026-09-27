@@ -229,6 +229,13 @@ const content = document.getElementById('content');
       '<a class="back" href="/Galerija-/">\u2190 Nazad u Arhivu</a></div>';
     return;
   }
+  if(item.deletedAt){
+    content.innerHTML =
+      '<div class="missing"><p style="margin:0;">Ova slika je u korpi.</p>' +
+      '<p style="margin:8px 0 0;opacity:.75;font-size:14px;">Vrati je u Arhivi: Podešavanja \u2192 korpa.</p>' +
+      '<a class="back" href="/Galerija-/">\u2190 Nazad u Arhivu</a></div>';
+    return;
+  }
   document.title = item.name;
 
   const mimeMatch = /^data:([^;]+);/.exec(item.dataUrl || '');
