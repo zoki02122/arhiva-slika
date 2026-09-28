@@ -112,6 +112,9 @@
   .sheet-tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px;padding-bottom:4px;}
   .sheet-tabs button{flex:none;background:none;border:1px solid var(--paper-line);color:var(--paper-tab);padding:5px 12px;
     font-family:var(--font-ui);font-size:12px;cursor:pointer;border-radius:2px;}
+  .page-no{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom));
+    padding:4px 12px;border-radius:12px;background:var(--accent);color:var(--on-accent);
+    font-family:var(--font-num);font-size:12.5px;letter-spacing:.5px;pointer-events:none;}
   .sheet-tabs button.active{background:var(--paper-head);color:var(--brass);border-color:var(--paper-head);}
 /* =========================================================
    TEME (vrednosti preuzete iz aplikacije Troškovi)
@@ -223,10 +226,16 @@ async function itemFromNewDb(id){
     const d = await reqP(db.transaction('docs', 'readonly').objectStore('docs').get(id));
     if(!d) return undefined;
     if(d.purged) return null;
-    const p = Array.isArray(d.pages) ? d.pages[0] : null;
-    const f = p ? await reqP(db.transaction('files', 'readonly').objectStore('files').get(p.file)) : null;
+    /* sve stranice dokumenta, redom (prva je i dalje „blob“) */
+    const plist = Array.isArray(d.pages) ? d.pages : [];
+    const pages = [];
+    for(const p of plist){
+      const f = await reqP(db.transaction('files', 'readonly').objectStore('files').get(p.file));
+      if(f && f.blob) pages.push({blob:f.blob, mime:p.mime || f.blob.type || ''});
+    }
+    const p = plist[0] || null;
     return {id:d.id, name:d.name || '', type:d.kind || 'image', ext:d.ext || '', deletedAt:d.deletedAt || null,
-      blob:(f && f.blob) || null, mime:(p && p.mime) || (f && f.blob && f.blob.type) || ''};
+      blob:(pages[0] && pages[0].blob) || null, mime:(p && p.mime) || (pages[0] && pages[0].mime) || '', pages};
   }finally{ db.close(); }
 }
 async function itemFromOldDb(id){
@@ -298,9 +307,33 @@ const content = document.getElementById('content');
   const backTiny = '<a class="back tiny" href="/Galerija-/">Arhiva</a>';
 
   if(isImage){
+    const pages = (item.pages && item.pages.length) ? item.pages : [{blob:item.blob}];
+    const urls = pages.map(()=>null);
+    const urlOf = (i)=>{ if(!urls[i]) urls[i] = URL.createObjectURL(pages[i].blob); return urls[i]; };
     content.innerHTML =
-      '<div class="stage"><div class="photo" oncontextmenu="return false;" style="background-image:url(\''+URL.createObjectURL(item.blob)+'\')"></div></div>' +
-      backTiny;
+      '<div class="stage"><div class="photo" id="photoEl" oncontextmenu="return false;"></div></div>' +
+      (pages.length > 1 ? '<div class="page-no" id="pageNo"></div>' : '') + backTiny;
+    const photoEl = document.getElementById('photoEl');
+    let cur = 0;
+    const show = (i)=>{
+      cur = (i + pages.length) % pages.length;
+      photoEl.style.backgroundImage = "url('" + urlOf(cur) + "')";
+      const no = document.getElementById('pageNo');
+      if(no) no.textContent = 'str. ' + (cur + 1) + ' / ' + pages.length;
+    };
+    show(0);
+    if(pages.length > 1){
+      /* prevlačenje levo/desno lista stranice */
+      let sx = 0, sy = 0;
+      photoEl.addEventListener('touchstart', (e)=>{ if(e.touches[0]){ sx = e.touches[0].clientX; sy = e.touches[0].clientY; } }, {passive:true});
+      photoEl.addEventListener('touchend', (e)=>{
+        const t = e.changedTouches[0];
+        if(!t) return;
+        const dx = t.clientX - sx, dy = t.clientY - sy;
+        if(Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4) show(cur + (dx < 0 ? 1 : -1));
+      });
+      document.addEventListener('keydown', (e)=>{ if(e.key === 'ArrowRight') show(cur + 1); if(e.key === 'ArrowLeft') show(cur - 1); });
+    }
     document.title = item.name;
   }else if(isPdf){
     content.innerHTML = '<div class="stage"><canvas class="pdf-canvas" id="pdfCanvas"></canvas></div>' + backTiny;
