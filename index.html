@@ -191,10 +191,47 @@ html[data-theme="ponoc"]{
 <div id="content"><p class="missing">Učitavanje...</p></div>
 
 <script>
+/* Čita stavku prvo iz nove baze (arhivaDB), pa iz stare (galerijaDB, verzija 1 — ne menja se).
+   Nova baza se NIKAD ne pravi odavde: ako ne postoji, otvaranje se prekida (verziju i skladišta
+   određuje samo Arhiva). Vraća {id, name, type, ext, deletedAt, blob, mime} ili null. */
+const NEW_DB = 'arhivaDB';
 const IDB_NAME = 'galerijaDB';
 const IDB_STORE = 'items';
-function idbGetItem(id){
-  return new Promise((resolve)=>{
+async function dbListed(name){
+  if(!indexedDB.databases) return null;
+  try{ return (await indexedDB.databases()).some(d=>d.name === name); }catch(e){ return null; }
+}
+function reqP(r){
+  return new Promise(res=>{ r.onsuccess = ()=>res(r.result || null); r.onerror = ()=>res(null); });
+}
+function openNoCreate(name){
+  return new Promise(res=>{
+    try{
+      const q = indexedDB.open(name);
+      q.onupgradeneeded = ()=>{ try{ q.transaction.abort(); }catch(e){} };
+      q.onsuccess = ()=>res(q.result);
+      q.onerror = ()=>res(null);
+    }catch(e){ res(null); }
+  });
+}
+async function itemFromNewDb(id){
+  if(await dbListed(NEW_DB) === false) return undefined;
+  const db = await openNoCreate(NEW_DB);
+  if(!db) return undefined;
+  try{
+    if(!db.objectStoreNames.contains('docs') || !db.objectStoreNames.contains('files')) return undefined;
+    const d = await reqP(db.transaction('docs', 'readonly').objectStore('docs').get(id));
+    if(!d) return undefined;
+    if(d.purged) return null;
+    const p = Array.isArray(d.pages) ? d.pages[0] : null;
+    const f = p ? await reqP(db.transaction('files', 'readonly').objectStore('files').get(p.file)) : null;
+    return {id:d.id, name:d.name || '', type:d.kind || 'image', ext:d.ext || '', deletedAt:d.deletedAt || null,
+      blob:(f && f.blob) || null, mime:(p && p.mime) || (f && f.blob && f.blob.type) || ''};
+  }finally{ db.close(); }
+}
+async function itemFromOldDb(id){
+  if(await dbListed(IDB_NAME) === false) return null;
+  const old = await new Promise((resolve)=>{
     try{
       const req = indexedDB.open(IDB_NAME, 1);
       req.onupgradeneeded = ()=>{
@@ -203,15 +240,25 @@ function idbGetItem(id){
       };
       req.onsuccess = ()=>{
         const db = req.result;
-        if(!db.objectStoreNames.contains(IDB_STORE)){ resolve(null); return; }
-        const tx = db.transaction(IDB_STORE, 'readonly');
-        const getReq = tx.objectStore(IDB_STORE).get(id);
-        getReq.onsuccess = ()=>resolve(getReq.result || null);
-        getReq.onerror = ()=>resolve(null);
+        if(!db.objectStoreNames.contains(IDB_STORE)){ db.close(); resolve(null); return; }
+        const getReq = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(id);
+        getReq.onsuccess = ()=>{ resolve(getReq.result || null); db.close(); };
+        getReq.onerror = ()=>{ resolve(null); db.close(); };
       };
       req.onerror = ()=>resolve(null);
     }catch(e){ resolve(null); }
   });
+  if(!old) return null;
+  const mm = /^data:([^;,]+)/.exec(old.dataUrl || '');
+  let blob = null;
+  try{ blob = old.dataUrl ? await (await fetch(old.dataUrl)).blob() : null; }catch(e){ blob = null; }
+  return {id:old.id, name:old.name || '', type:old.type || 'image', ext:old.ext || '', deletedAt:old.deletedAt || null,
+    blob, mime: mm ? mm[1] : ''};
+}
+async function idbGetItem(id){
+  const n = await itemFromNewDb(id);
+  if(n !== undefined) return n;
+  return await itemFromOldDb(id);
 }
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -236,10 +283,15 @@ const content = document.getElementById('content');
       '<a class="back" href="/Galerija-/">\u2190 Nazad u Arhivu</a></div>';
     return;
   }
+  if(!item.blob){
+    content.innerHTML =
+      '<div class="missing"><p style="margin:0;">Fajl nije pronađen.</p>' +
+      '<a class="back" href="/Galerija-/">\u2190 Nazad u Arhivu</a></div>';
+    return;
+  }
   document.title = item.name;
 
-  const mimeMatch = /^data:([^;]+);/.exec(item.dataUrl || '');
-  const mime = mimeMatch ? mimeMatch[1] : '';
+  const mime = item.mime || item.blob.type || '';
   const isPdf = item.type === 'pdf' || mime === 'application/pdf';
   const isImage = !isPdf && (item.type === 'image' || (item.type !== 'doc' && mime.indexOf('image/') === 0));
 
@@ -247,16 +299,14 @@ const content = document.getElementById('content');
 
   if(isImage){
     content.innerHTML =
-      '<div class="stage"><div class="photo" oncontextmenu="return false;" style="background-image:url(\''+item.dataUrl.replace(/'/g,"%27")+'\')"></div></div>' +
+      '<div class="stage"><div class="photo" oncontextmenu="return false;" style="background-image:url(\''+URL.createObjectURL(item.blob)+'\')"></div></div>' +
       backTiny;
     document.title = item.name;
   }else if(isPdf){
     content.innerHTML = '<div class="stage"><canvas class="pdf-canvas" id="pdfCanvas"></canvas></div>' + backTiny;
     const openFullDoc = async ()=>{
       try{
-        const res = await fetch(item.dataUrl);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(item.blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = (item.name || 'dokument') + '.pdf';
@@ -267,10 +317,7 @@ const content = document.getElementById('content');
     };
     try{
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-      const base64 = item.dataUrl.split(',')[1];
-      const raw = atob(base64);
-      const bytes = new Uint8Array(raw.length);
-      for(let i=0;i<raw.length;i++){ bytes[i] = raw.charCodeAt(i); }
+      const bytes = new Uint8Array(await item.blob.arrayBuffer());
       const pdf = await pdfjsLib.getDocument({data: bytes}).promise;
       const page = await pdf.getPage(1);
       const canvas = document.getElementById('pdfCanvas');
@@ -315,9 +362,7 @@ const content = document.getElementById('content');
 
     const downloadFile = async ()=>{
       try{
-        const res = await fetch(item.dataUrl);
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(item.blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = fileName;
@@ -343,11 +388,7 @@ const content = document.getElementById('content');
         showFallback('mammoth.js nije učitan (CDN nedostupan)');
       }else{
       try{
-        const base64 = item.dataUrl.split(',')[1];
-        const raw = atob(base64);
-        const bytes = new Uint8Array(raw.length);
-        for(let i=0;i<raw.length;i++){ bytes[i] = raw.charCodeAt(i); }
-        const result = await mammoth.convertToHtml({arrayBuffer: bytes.buffer});
+        const result = await mammoth.convertToHtml({arrayBuffer: await item.blob.arrayBuffer()});
         content.innerHTML =
           '<div class="doc-reader"><div class="doc-reader-inner">'+result.value+'</div></div>' +
           '<div class="doc-reader-bar"><a class="back-inline" href="/Galerija-/">\u2190 Arhiva</a><p class="cap">'+escapeHtml(item.name)+'</p><button class="open-btn" id="openDoc">Preuzmi</button></div>';
@@ -363,8 +404,7 @@ const content = document.getElementById('content');
         showFallback('xlsx.js nije učitan (CDN nedostupan)');
       }else{
       try{
-        const base64 = item.dataUrl.split(',')[1];
-        const wb = XLSX.read(base64, {type:'base64'});
+        const wb = XLSX.read(new Uint8Array(await item.blob.arrayBuffer()), {type:'array'});
         let activeSheet = wb.SheetNames[0];
         const renderSheet = (name)=>{
           const html = XLSX.utils.sheet_to_html(wb.Sheets[name], {editable:false});
