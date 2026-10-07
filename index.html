@@ -121,6 +121,10 @@
     padding:10px 12px 10px 8px;border-radius:14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);
     box-shadow:0 6px 20px rgba(0,0,0,.35);font-family:var(--font-ui);font-size:14px;line-height:1.35;}
   .sc-hint[hidden]{display:none;}
+  /* v133: uputstvo je skriveno iza ⓘ gore desno; otvara se samo dodirom */
+  .sc-info{position:fixed;right:10px;top:calc(10px + env(safe-area-inset-top));z-index:49;width:40px;height:40px;border-radius:50%;
+    border:1.5px solid var(--brass);background:var(--surface);color:var(--brass);display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;}
+  .sc-info[hidden]{display:none;}
   .sc-tx{flex:1;min-width:0;}
   .sc-tx b{color:var(--brass);font-weight:600;}
   .sc-x{flex:none;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:none;color:var(--ink-dim);
@@ -201,6 +205,7 @@ html[data-theme="ponoc"]{
 </style>
 </head>
 <body>
+<button type="button" class="sc-info" id="scInfo" hidden aria-label="Kako do ikonice na početnom ekranu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="11" x2="12" y2="17"></line><circle cx="12" cy="7.5" r="0.6" fill="currentColor"></circle></svg></button>
 <div class="sc-hint" id="scHint" hidden>
   <button type="button" class="sc-x" id="scHintX" aria-label="Zatvori">&#x2715;</button>
   <div class="sc-tx">Za ikonicu na početnom ekranu: <b>&#x22EE;</b> gore desno &rarr; <b>„Dodaj na početni ekran“</b> ili <b>„Instaliraj i kreiraj prečicu“</b></div>
@@ -289,14 +294,13 @@ function escapeHtml(s){
 }
 const params = new URLSearchParams(location.search);
 const id = params.get('p');
-/* traka-uputstvo: prikazuje se dok je za ovu stavku ne zatvoriš (pamti se na telefonu) */
+/* v133: uputstvo je zatvoreno; ⓘ gore desno ga otvara, ✕ (ili ponovo ⓘ) ga zatvara */
 (function(){
-  const h = document.getElementById('scHint'); if(!h || !id) return;
-  const key = 'arhiva-slika:hintOff:' + id;
-  let off = false; try{ off = localStorage.getItem(key) === '1'; }catch(e){}
-  if(off) return;
-  h.hidden = false;
-  document.getElementById('scHintX').onclick = ()=>{ h.hidden = true; try{ localStorage.setItem(key, '1'); }catch(e){} };
+  const h = document.getElementById('scHint'), btn = document.getElementById('scInfo'); if(!h || !btn || !id) return;
+  btn.hidden = false;
+  const set = (on)=>{ h.hidden = !on; btn.hidden = on; };
+  btn.onclick = ()=>set(true);
+  document.getElementById('scHintX').onclick = ()=>set(false);
 })();
 const content = document.getElementById('content');
 
