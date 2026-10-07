@@ -116,6 +116,16 @@
     padding:4px 12px;border-radius:12px;background:var(--accent);color:var(--on-accent);
     font-family:var(--font-num);font-size:12.5px;letter-spacing:.5px;pointer-events:none;}
   .sheet-tabs button.active{background:var(--paper-head);color:var(--brass);border-color:var(--paper-head);}
+/* traka-uputstvo za ikonicu na početnom ekranu (privremeno, dok ne postoji Android aplikacija) */
+  .sc-hint{position:fixed;left:8px;right:8px;top:calc(8px + env(safe-area-inset-top));z-index:50;display:flex;align-items:center;gap:10px;
+    padding:10px 12px 10px 8px;border-radius:14px;background:var(--surface);color:var(--ink);border:1px solid var(--line);
+    box-shadow:0 6px 20px rgba(0,0,0,.35);font-family:var(--font-ui);font-size:14px;line-height:1.35;}
+  .sc-hint[hidden]{display:none;}
+  .sc-tx{flex:1;min-width:0;}
+  .sc-tx b{color:var(--brass);font-weight:600;}
+  .sc-x{flex:none;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:none;color:var(--ink-dim);
+    font-size:15px;cursor:pointer;padding:0;}
+  .sc-ar{flex:none;color:var(--brass);align-self:flex-start;}
 /* =========================================================
    TEME (vrednosti preuzete iz aplikacije Troškovi)
    Klasična = :root iznad (dosadašnji izgled Arhive)
@@ -191,6 +201,11 @@ html[data-theme="ponoc"]{
 </style>
 </head>
 <body>
+<div class="sc-hint" id="scHint" hidden>
+  <button type="button" class="sc-x" id="scHintX" aria-label="Zatvori">&#x2715;</button>
+  <div class="sc-tx">Za ikonicu na početnom ekranu: <b>&#x22EE;</b> gore desno &rarr; <b>„Dodaj na početni ekran“</b> ili <b>„Instaliraj i kreiraj prečicu“</b></div>
+  <svg class="sc-ar" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="8 7 17 7 17 16"></polyline></svg>
+</div>
 <div id="content"><p class="missing">Učitavanje...</p></div>
 
 <script>
@@ -274,6 +289,15 @@ function escapeHtml(s){
 }
 const params = new URLSearchParams(location.search);
 const id = params.get('p');
+/* traka-uputstvo: prikazuje se dok je za ovu stavku ne zatvoriš (pamti se na telefonu) */
+(function(){
+  const h = document.getElementById('scHint'); if(!h || !id) return;
+  const key = 'arhiva-slika:hintOff:' + id;
+  let off = false; try{ off = localStorage.getItem(key) === '1'; }catch(e){}
+  if(off) return;
+  h.hidden = false;
+  document.getElementById('scHintX').onclick = ()=>{ h.hidden = true; try{ localStorage.setItem(key, '1'); }catch(e){} };
+})();
 const content = document.getElementById('content');
 
 (async ()=>{
